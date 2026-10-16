@@ -1,19 +1,68 @@
-# README
+# Photo Backup
 
-## About
+โปรแกรมย้ายรูปจากแฟลชไดรฟ์หรือโทรศัพท์มาเก็บบนเครื่อง (Windows / macOS)
 
-This is the official Wails Vanilla template.
+- **Wails** (Go) + Frontend **Nuxt**
+- ฐานข้อมูล **SQLite** เชื่อมต่อผ่าน **GORM** (ใช้ driver `glebarez/sqlite` ที่เป็น pure Go ไม่ต้องมี C compiler)
 
-You can configure the project by editing `wails.json`. More information about the project settings can be found
-here: https://wails.io/docs/reference/project-config
+## ความสามารถ
 
-## Live Development
+โปรแกรมนี้รวมคำสั่งจากโปรแกรม CLI (flash-backup) เข้ามาเป็นหน้าจอทั้งหมด
 
-To run in live development mode, run `wails dev` in the project directory. This will run a Vite development
-server that will provide very fast hot reload of your frontend changes. If you want to develop in a browser
-and have access to your Go methods, there is also a dev server that runs on http://localhost:34115. Connect
-to this in your browser, and you can call your Go code from devtools.
+| คำสั่งเดิม | ทำอะไร | อยู่ที่หน้า |
+|---|---|---|
+| `/source <path>` | เลือกโฟลเดอร์ต้นทาง (จำไว้ใช้ครั้งต่อไป) | ย้ายรูป |
+| `/dest <path>` | เลือกโฟลเดอร์ปลายทาง และตรวจความถูกต้องของรูปที่เคยสำรองไว้ทันที | ย้ายรูป |
+| `/list source` | แสดงรูปในต้นทาง (ติดป้ายรูปที่มีในปลายทางแล้ว) | ย้ายรูป |
+| `/move a.jpg,b.jpg` / `/move all` | ย้ายรูปที่เลือก / ทั้งหมด ข้ามรูปซ้ำ และแสดงเวลาที่ใช้ | ย้ายรูป |
+| `/list dest` | แสดงรูปในปลายทาง | รูปในปลายทาง |
+| `/check` | เทียบประวัติในฐานข้อมูลกับไฟล์จริงในปลายทาง | รูปในปลายทาง |
+| `/delete a.jpg` / `/delete all` | ลบรูปในปลายทาง ทั้งไฟล์และประวัติ | รูปในปลายทาง |
+| `/list db [path]` | ประวัติการสำรอง แสดงเฉพาะปลายทางที่เลือก | ประวัติ |
+| `/clean` | ล้างประวัติของปลายทางปัจจุบัน (ไม่ลบไฟล์รูป) | ประวัติ |
+| `/clean all` | รีเซ็ตฐานข้อมูลทั้งหมด (ไม่ลบไฟล์รูป) | ประวัติ |
 
-## Building
+รายละเอียดการทำงาน
 
-To build a redistributable, production mode package, use `wails build`.
+- **ย้าย ไม่ใช่คัดลอก**: ใช้ `os.Rename` ก่อน ถ้าข้ามไดรฟ์จะคัดลอกให้ครบ ตรวจขนาด แล้วค่อยลบต้นทาง
+  เขียนลงไฟล์ชั่วคราว `.part` ก่อน จึงไม่เหลือรูปที่ไม่สมบูรณ์ถ้าถอดแฟลชไดรฟ์กลางทาง
+- **รูปซ้ำ**: ตรวจทั้งในฐานข้อมูลและในโฟลเดอร์ปลายทางจริง รูปที่ซ้ำจะถูกข้ามและไม่ถูกลบจากต้นทาง
+- **ประวัติแยกตามปลายทาง**: ทุกคำสั่งกรองด้วย `dest` และ path ถูกทำให้เป็นรูปแบบเดียวกันก่อนบันทึก
+  (`C:\backup`, `C:\backup\` และ `C:/backup` นับเป็นโฟลเดอร์เดียวกัน)
+- รองรับไฟล์ `.jpg .jpeg .png .gif .webp .bmp .heic .heif` ย้ายได้ทุกชนิด
+  แต่รูปตัวอย่างบนหน้าจอย่อด้วย Go (`fileops/thumbnail.go`) ซึ่งอ่านได้เฉพาะ JPG, PNG, GIF
+  และหมุนตามทิศถ่ายของโทรศัพท์ (EXIF) ให้ ไฟล์ HEIC, WebP, BMP จะแสดงเป็นช่อง "ดูตัวอย่างไม่ได้" แต่ย้ายได้ปกติ
+- ข้ามไฟล์ที่ขึ้นต้นด้วยจุด เช่น `._IMG_0001.jpg` ที่เครื่อง Mac สร้างทิ้งไว้ในแฟลชไดรฟ์
+
+## โครงสร้างโปรเจค
+
+```
+main.go, app.go        จุดเริ่มต้น Wails
+model/                 โครงสร้างตาราง (Photo, Tag, Setting)
+repository/            เชื่อมต่อฐานข้อมูล และคำสั่ง GORM ของแต่ละตาราง
+service/               ลอจิกที่หน้าจอเรียกผ่าน Wails (ตั้งโฟลเดอร์ ย้าย ตรวจ ลบ ล้างประวัติ)
+fileops/               จัดการไฟล์บนดิสก์ (ย้าย คัดลอก ตรวจชื่อไฟล์รูป) พร้อมเทสต์
+frontend/              Nuxt (app/pages: index, destination, history)
+database/photo.db      ฐานข้อมูล SQLite
+```
+
+## รันและ build
+
+```bash
+wails dev      # รันแบบพัฒนา แก้ไฟล์แล้วโหลดใหม่อัตโนมัติ
+wails build    # สร้างโปรแกรมสำหรับแจกจ่าย (build บน Windows ได้ .exe, บน macOS ได้ .app)
+go test ./fileops/   # ทดสอบส่วนจัดการไฟล์
+```
+
+ต้องติดตั้ง Go, Node.js และ Wails CLI ก่อน (ตรวจสภาพแวดล้อมด้วย `wails doctor`)
+
+ไฟล์ใน `frontend/wailsjs/` ถูกสร้างโดย Wails ทุกครั้งที่รัน `wails dev` หรือ `wails build`
+เมื่อเพิ่มหรือแก้ method ใน `service/` ไม่ต้องแก้ไฟล์เหล่านั้นเอง
+
+## การตั้งค่า
+
+`.env` กำหนดตำแหน่งฐานข้อมูล (ถ้าไม่มีไฟล์นี้จะใช้ `database/photo.db` ในโฟลเดอร์ที่เปิดโปรแกรม)
+
+```
+DATABASE=database/photo.db
+```

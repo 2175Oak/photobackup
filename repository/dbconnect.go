@@ -14,17 +14,23 @@ import (
 var db *gorm.DB
 
 func NewDbConnection() (*gorm.DB, error) {
+	// ไม่มี .env ก็ไม่เป็นไร จะใช้ค่าเริ่มต้นด้านล่าง
+	// (แอปที่ build แล้วอาจถูกเปิดจากโฟลเดอร์อื่นที่ไม่มีไฟล์นี้)
 	if err := godotenv.Load(); err != nil {
-		log.Println("Error loading .env file:", err)
-		return nil, err
+		log.Println("ไม่พบไฟล์ .env ใช้ค่าเริ่มต้นแทน:", err)
 	}
 
 	dbPath := os.Getenv("DATABASE")
-	dir, err := os.Getwd()
-	if err != nil {
-		return nil, err
+	if dbPath == "" {
+		dbPath = filepath.Join("database", "photo.db")
 	}
-	dbPath = filepath.Join(dir, dbPath)
+	if !filepath.IsAbs(dbPath) {
+		dir, err := os.Getwd()
+		if err != nil {
+			return nil, err
+		}
+		dbPath = filepath.Join(dir, dbPath)
+	}
 	log.Println("Database path:", dbPath)
 
 	// สร้างโฟลเดอร์ database ถ้ายังไม่มี
@@ -39,7 +45,7 @@ func NewDbConnection() (*gorm.DB, error) {
 	}
 
 	// สร้าง/อัปเดตตารางอัตโนมัติจาก Model
-	if err := database.AutoMigrate(&model.Photo{}, &model.Tag{}); err != nil {
+	if err := database.AutoMigrate(&model.Photo{}, &model.Tag{}, &model.Setting{}); err != nil {
 		log.Println("Error migrating:", err)
 		return nil, err
 	}
