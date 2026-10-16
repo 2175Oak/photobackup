@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"photo-backup/fileops"
+	"photo-backup/gemini"
 	"photo-backup/model"
 	"photo-backup/repository"
 
@@ -39,6 +40,9 @@ type PhotoService struct {
 	opMu sync.Mutex // ให้ย้าย/ลบ/ล้างข้อมูล ทำได้ทีละงาน
 
 	thumbSem chan struct{} // จำกัดจำนวนรูปที่ถูกย่อพร้อมกัน ไม่ให้กินหน่วยความจำมาก
+
+	gemini        *gemini.Client     // วิเคราะห์ภาพ (อ่าน GEMINI_API_KEY จาก .env)
+	cancelAnalyze context.CancelFunc // หยุดงานวิเคราะห์ที่กำลังทำอยู่ (ป้องกันด้วย mu)
 }
 
 func NewPhotoService(db *gorm.DB) *PhotoService {
@@ -46,6 +50,7 @@ func NewPhotoService(db *gorm.DB) *PhotoService {
 		photos:   repository.NewPhotoRepository(db),
 		settings: repository.NewSettingRepository(db),
 		thumbSem: make(chan struct{}, 3),
+		gemini:   gemini.New(os.Getenv("GEMINI_API_KEY"), os.Getenv("GEMINI_MODEL")),
 	}
 	// จำโฟลเดอร์ที่ใช้ครั้งล่าสุด
 	if cfg, err := s.settings.Load(); err == nil {

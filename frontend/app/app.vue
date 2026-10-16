@@ -12,6 +12,7 @@
       <nav class="nav" aria-label="เมนูหลัก">
         <NuxtLink to="/">ย้ายรูป</NuxtLink>
         <NuxtLink to="/destination">รูปในปลายทาง</NuxtLink>
+        <NuxtLink to="/search">ค้นหารูป</NuxtLink>
         <NuxtLink to="/history">ประวัติ</NuxtLink>
       </nav>
 

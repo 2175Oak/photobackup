@@ -4,6 +4,10 @@ import {service} from '../models';
 import {model} from '../models';
 import {context} from '../models';
 
+export function AnalyzePending():Promise<service.AnalyzeResult>;
+
+export function CancelAnalyze():Promise<void>;
+
 export function CheckIntegrity():Promise<Array<service.IntegrityItem>>;
 
 export function CleanAll():Promise<service.CleanAllResult>;
@@ -13,6 +17,8 @@ export function CleanDest():Promise<number>;
 export function Delete(arg1:Array<string>):Promise<service.DeleteResult>;
 
 export function DeleteAll():Promise<service.DeleteResult>;
+
+export function GetAnalysisStatus():Promise<service.AnalysisStatus>;
 
 export function GetState():Promise<service.State>;
 
@@ -24,9 +30,13 @@ export function ListHistory(arg1:string):Promise<Array<model.Photo>>;
 
 export function ListSource():Promise<Array<service.FileInfo>>;
 
+export function ListTags():Promise<Array<model.TagCount>>;
+
 export function Move(arg1:Array<string>):Promise<service.MoveResult>;
 
 export function MoveAll():Promise<service.MoveResult>;
+
+export function SearchPhotos(arg1:string,arg2:Array<string>):Promise<Array<model.Photo>>;
 
 export function SelectFolder(arg1:string):Promise<string>;
 

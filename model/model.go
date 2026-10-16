@@ -26,3 +26,9 @@ type Setting struct {
 	Source string
 	Dest   string
 }
+
+// TagCount คือแท็กหนึ่งแท็กพร้อมจำนวนรูปที่ใช้แท็กนี้ (ใช้วาด Tag Cloud)
+type TagCount struct {
+	Name  string `json:"name"`
+	Count int    `json:"count"`
+}
