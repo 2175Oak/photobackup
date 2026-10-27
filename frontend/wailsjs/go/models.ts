@@ -20,6 +20,7 @@ export namespace model {
 	    dest: string;
 	    backupPath: string;
 	    caption: string;
+	    analysisState: string;
 	    // Go type: time
 	    backedUpAt: any;
 	    tags: Tag[];
@@ -35,6 +36,7 @@ export namespace model {
 	        this.dest = source["dest"];
 	        this.backupPath = source["backupPath"];
 	        this.caption = source["caption"];
+	        this.analysisState = source["analysisState"];
 	        this.backedUpAt = this.convertValues(source["backedUpAt"], null);
 	        this.tags = this.convertValues(source["tags"], Tag);
 	    }
@@ -77,7 +79,47 @@ export namespace model {
 
 export namespace service {
 	
+	export class AnalysisMetrics {
+	    requests: number;
+	    inputTokens: number;
+	    outputTokens: number;
+	    tokensReported: boolean;
+	    active: number;
+	    concurrency: number;
+	    waitSeconds: number;
+	    apiSeconds: number;
+	    phase: string;
+	    prepared: number;
+	    cached: number;
+	    elapsedSeconds: number;
+	    photosPerMinute: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new AnalysisMetrics(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.requests = source["requests"];
+	        this.inputTokens = source["inputTokens"];
+	        this.outputTokens = source["outputTokens"];
+	        this.tokensReported = source["tokensReported"];
+	        this.active = source["active"];
+	        this.concurrency = source["concurrency"];
+	        this.waitSeconds = source["waitSeconds"];
+	        this.apiSeconds = source["apiSeconds"];
+	        this.phase = source["phase"];
+	        this.prepared = source["prepared"];
+	        this.cached = source["cached"];
+	        this.elapsedSeconds = source["elapsedSeconds"];
+	        this.photosPerMinute = source["photosPerMinute"];
+	    }
+	}
 	export class AnalysisStatus {
+	    batchSize: number;
+	    workers: number;
+	    rpm: number;
+	    tpm: number;
 	    configured: boolean;
 	    model: string;
 	    total: number;
@@ -89,6 +131,10 @@ export namespace service {
 	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.batchSize = source["batchSize"];
+	        this.workers = source["workers"];
+	        this.rpm = source["rpm"];
+	        this.tpm = source["tpm"];
 	        this.configured = source["configured"];
 	        this.model = source["model"];
 	        this.total = source["total"];
@@ -112,6 +158,7 @@ export namespace service {
 	    }
 	}
 	export class AnalyzeResult {
+	    metrics: AnalysisMetrics;
 	    done: number;
 	    failed: number;
 	    cancelled: boolean;
@@ -123,6 +170,7 @@ export namespace service {
 	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.metrics = this.convertValues(source["metrics"], AnalysisMetrics);
 	        this.done = source["done"];
 	        this.failed = source["failed"];
 	        this.cancelled = source["cancelled"];

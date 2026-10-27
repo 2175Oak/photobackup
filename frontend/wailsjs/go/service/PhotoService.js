@@ -6,6 +6,10 @@ export function AnalyzePending() {
   return window['go']['service']['PhotoService']['AnalyzePending']();
 }
 
+export function AnalyzeSample() {
+  return window['go']['service']['PhotoService']['AnalyzeSample']();
+}
+
 export function CancelAnalyze() {
   return window['go']['service']['PhotoService']['CancelAnalyze']();
 }
@@ -28,6 +32,10 @@ export function Delete(arg1) {
 
 export function DeleteAll() {
   return window['go']['service']['PhotoService']['DeleteAll']();
+}
+
+export function DescribePhoto(arg1) {
+  return window['go']['service']['PhotoService']['DescribePhoto'](arg1);
 }
 
 export function GetAnalysisStatus() {

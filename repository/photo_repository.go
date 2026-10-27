@@ -1,8 +1,6 @@
 package repository
 
 import (
-	"strings"
-
 	"photo-backup/model"
 
 	"gorm.io/gorm"
@@ -108,7 +106,7 @@ func (r *PhotoRepository) DeleteAll() (photos int64, tags int64, err error) {
 // PendingAnalysis คืนรูปของปลายทางนี้ที่ยังไม่มีคำอธิบาย (ยังไม่เคยวิเคราะห์) เรียงจากเก่าไปใหม่
 func (r *PhotoRepository) PendingAnalysis(dest string) ([]model.Photo, error) {
 	photos := []model.Photo{}
-	err := r.db.Where("dest = ? AND (caption IS NULL OR caption = '')", dest).Order("id ASC").Find(&photos).Error
+	err := r.db.Where("dest = ? AND (caption IS NULL OR caption = '') AND COALESCE(analysis_state, '') <> 'done'", dest).Order("id ASC").Find(&photos).Error
 	return photos, err
 }
 
@@ -117,7 +115,7 @@ func (r *PhotoRepository) CountAnalysis(dest string) (total, analyzed int64, err
 	if err = r.db.Model(&model.Photo{}).Where("dest = ?", dest).Count(&total).Error; err != nil {
 		return
 	}
-	err = r.db.Model(&model.Photo{}).Where("dest = ? AND caption <> ''", dest).Count(&analyzed).Error
+	err = r.db.Model(&model.Photo{}).Where("dest = ? AND (caption <> '' OR analysis_state = 'done')", dest).Count(&analyzed).Error
 	return
 }
 
@@ -125,7 +123,7 @@ func (r *PhotoRepository) CountAnalysis(dest string) (total, analyzed int64, err
 // แท็กชื่อซ้ำจะใช้แถวเดิมในตาราง tags ไม่สร้างใหม่
 func (r *PhotoRepository) SaveAnalysis(photoID int64, caption string, tagNames []string) error {
 	return r.db.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Model(&model.Photo{}).Where("id = ?", photoID).Update("caption", caption).Error; err != nil {
+		if err := tx.Model(&model.Photo{}).Where("id = ?", photoID).Updates(map[string]any{"caption": caption, "analysis_state": "done", "analysis_error": ""}).Error; err != nil {
 			return err
 		}
 		tags := make([]model.Tag, 0, len(tagNames))
@@ -140,21 +138,13 @@ func (r *PhotoRepository) SaveAnalysis(photoID int64, caption string, tagNames [
 	})
 }
 
-// escapeLike ทำให้ % _ \ ในคำค้นหาเป็นตัวอักษรธรรมดา ไม่ใช่ wildcard ของ LIKE
-func escapeLike(s string) string {
-	return strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(s)
-}
-
-// Search ค้นรูปของปลายทางนี้ที่มีคำอธิบายเท่านั้น
-//   - words: ทุกคำต้องอยู่ในคำอธิบาย (ไม่สนตัวพิมพ์เล็ก/ใหญ่ของภาษาอังกฤษ)
+// Search ค้น caption และ tags รองรับคำพิมพ์ผิดและจัดอันดับความใกล้เคียง
+//   - words: ทุกคำต้องตรงหรือใกล้เคียงกับ caption/tag อย่างน้อยหนึ่งแห่ง
 //   - tags : รูปต้องมีครบทุกแท็กที่เลือก
 //
 // ถ้าไม่ส่งทั้งสองอย่างจะคืนรูปที่วิเคราะห์แล้วทั้งหมด
 func (r *PhotoRepository) Search(dest string, words, tags []string) ([]model.Photo, error) {
-	q := r.db.Preload("Tags").Where("dest = ? AND caption <> ''", dest)
-	for _, w := range words {
-		q = q.Where(`caption LIKE ? ESCAPE '\'`, "%"+escapeLike(w)+"%")
-	}
+	q := r.db.Preload("Tags").Where("dest = ? AND (caption <> '' OR analysis_state = 'done')", dest)
 	if len(tags) > 0 {
 		q = q.Where(
 			`id IN (SELECT pt.photo_id FROM photo_tag pt JOIN tags t ON t.id = pt.tag_id
@@ -164,7 +154,10 @@ func (r *PhotoRepository) Search(dest string, words, tags []string) ([]model.Pho
 	}
 	photos := []model.Photo{}
 	err := q.Order("id DESC").Find(&photos).Error
-	return photos, err
+	if err != nil {
+		return nil, err
+	}
+	return rankPhotos(photos, words), nil
 }
 
 // TagCounts คืนแท็กทั้งหมดของรูปในปลายทางนี้พร้อมจำนวนรูป เรียงจากมากไปน้อย

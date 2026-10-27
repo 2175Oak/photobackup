@@ -3,11 +3,9 @@ package service
 import (
 	"context"
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"photo-backup/fileops"
 	"photo-backup/gemini"
@@ -15,14 +13,17 @@ import (
 )
 
 const (
-	analyzeMaxSide  = 1280             // ย่อรูปก่อนส่ง ประหยัดเน็ตและโควตา คำอธิบายก็ยังแม่นพอ
+	analyzeMaxSide  = 768              // ย่อภาพก่อนส่ง ลดข้อมูลสำหรับงานคำอธิบายและแท็ก
 	analyzeMaxRaw   = 15 * 1024 * 1024 // รูปที่ย่อเองไม่ได้ (HEIC/WebP) ส่งไฟล์ดิบได้ไม่เกินนี้
-	analyzeTimeout  = 90 * time.Second
 	analyzeProgress = "analyze:progress"
 )
 
 // AnalysisStatus บอกว่าตอนนี้วิเคราะห์ภาพได้หรือยัง และวิเคราะห์ไปแล้วกี่รูป
 type AnalysisStatus struct {
+	BatchSize  int    `json:"batchSize"`
+	Workers    int    `json:"workers"`
+	RPM        int    `json:"rpm"`
+	TPM        int    `json:"tpm"`
 	Configured bool   `json:"configured"` // มี GEMINI_API_KEY หรือไม่
 	Model      string `json:"model"`
 	Total      int64  `json:"total"`    // รูปในประวัติของปลายทางปัจจุบัน
@@ -30,15 +31,26 @@ type AnalysisStatus struct {
 }
 
 type AnalyzeResult struct {
-	Done      int          `json:"done"`
-	Failed    int          `json:"failed"`
-	Cancelled bool         `json:"cancelled"`
-	Items     []FileResult `json:"items"`
+	Metrics   AnalysisMetrics `json:"metrics"`
+	Done      int             `json:"done"`
+	Failed    int             `json:"failed"`
+	Cancelled bool            `json:"cancelled"`
+	Items     []FileResult    `json:"items"`
+}
+
+// Analysis progress includes actual outcomes, rather than only attempted files.
+type analysisProgressEvent struct {
+	ProgressEvent
+	Succeeded int    `json:"succeeded"`
+	Failed    int    `json:"failed"`
+	Message   string `json:"message"`
+	Stopped   bool   `json:"stopped"`
 }
 
 // GetAnalysisStatus ใช้แสดงสถานะบนหน้าค้นหา
 func (s *PhotoService) GetAnalysisStatus() (AnalysisStatus, error) {
-	st := AnalysisStatus{Configured: s.gemini.Configured(), Model: s.gemini.Model()}
+	st := AnalysisStatus{Configured: s.batch.Configured(), Model: s.batch.Model()}
+	st.BatchSize, st.Workers, st.RPM, st.TPM = s.batch.Settings().Size, s.batch.Settings().Workers, s.batch.Settings().RPM, s.batch.Settings().TPM
 	dest := s.snapshot().Dest
 	if dest == "" {
 		return st, nil
@@ -49,10 +61,18 @@ func (s *PhotoService) GetAnalysisStatus() (AnalysisStatus, error) {
 }
 
 // AnalyzePending ให้ Gemini อธิบายและตั้งแท็กให้รูปของปลายทางปัจจุบันที่ยังไม่เคยวิเคราะห์
-// ทำทีละรูปและส่งความคืบหน้าผ่านอีเวนต์ "analyze:progress" รูปที่พลาดจะยังไม่มีคำอธิบาย
+// ใช้คิวเป็นชุดและส่งความคืบหน้าผ่านอีเวนต์ "analyze:progress"
 // จึงกดวิเคราะห์ซ้ำได้โดยไม่ต้องทำรูปที่สำเร็จแล้วใหม่
 func (s *PhotoService) AnalyzePending() (AnalyzeResult, error) {
-	if !s.gemini.Configured() {
+	return s.analyzePending(0)
+}
+
+// AnalyzeSample saves real results for at most 100 pending photos, so the
+// following full run skips them instead of paying for the same work twice.
+func (s *PhotoService) AnalyzeSample() (AnalyzeResult, error) { return s.analyzePending(100) }
+
+func (s *PhotoService) analyzePending(limit int) (AnalyzeResult, error) {
+	if !s.batch.Configured() {
 		return AnalyzeResult{}, gemini.ErrNoKey
 	}
 	if !s.opMu.TryLock() {
@@ -71,6 +91,9 @@ func (s *PhotoService) AnalyzePending() (AnalyzeResult, error) {
 	if len(pending) == 0 {
 		return AnalyzeResult{}, errors.New("ไม่มีรูปที่ต้องวิเคราะห์ (วิเคราะห์ครบแล้ว)")
 	}
+	if limit > 0 && len(pending) > limit {
+		pending = pending[:limit]
+	}
 
 	base := s.ctx
 	if base == nil {
@@ -87,40 +110,11 @@ func (s *PhotoService) AnalyzePending() (AnalyzeResult, error) {
 		s.mu.Unlock()
 	}()
 
-	res := AnalyzeResult{Items: make([]FileResult, 0, len(pending))}
-	for i, p := range pending {
-		if ctx.Err() != nil {
-			res.Cancelled = true
-			break
-		}
-		item := FileResult{Name: p.FileName}
-		fatal := false
-
-		if err := s.analyzeOne(ctx, dest, p); err != nil {
-			item.Status = StatusFailed
-			item.Message = err.Error()
-			var ae *gemini.APIError
-			fatal = errors.As(err, &ae) && ae.Fatal()
-			if ctx.Err() != nil {
-				res.Cancelled = true
-				item.Message = "ยกเลิกการวิเคราะห์"
-			}
-			res.Failed++
-		} else {
-			item.Status = StatusMoved // ใช้สถานะ "สำเร็จ" ร่วมกับส่วนอื่น
-			res.Done++
-		}
-		res.Items = append(res.Items, item)
-		s.emit(analyzeProgress, ProgressEvent{Done: i + 1, Total: len(pending), Name: p.FileName, Status: item.Status})
-
-		if fatal { // key ผิด/ไม่มีสิทธิ์: ไม่มีประโยชน์ที่จะยิงรูปที่เหลือ
-			break
-		}
-		if res.Cancelled {
-			break
-		}
+	s.emit(analyzeProgress, analysisProgressEvent{ProgressEvent: ProgressEvent{Done: 0, Total: len(pending)}})
+	if err := s.photos.RecoverAnalysis(dest); err != nil {
+		return AnalyzeResult{}, err
 	}
-	return res, nil
+	return s.analyzeTagQueue(ctx, dest, pending), nil
 }
 
 // CancelAnalyze หยุดงานวิเคราะห์ที่กำลังทำอยู่ (รูปที่เสร็จแล้วยังอยู่ครบ)
@@ -131,32 +125,6 @@ func (s *PhotoService) CancelAnalyze() {
 	if cancel != nil {
 		cancel()
 	}
-}
-
-func (s *PhotoService) analyzeOne(ctx context.Context, dest string, p model.Photo) error {
-	if p.FileName != filepath.Base(p.FileName) || !fileops.IsImage(p.FileName) {
-		return errors.New("ชื่อไฟล์ไม่ถูกต้อง")
-	}
-	full := filepath.Join(dest, p.FileName)
-	if !fileops.Exists(full) {
-		return errors.New("ไม่พบไฟล์รูปในปลายทาง")
-	}
-
-	data, mime, err := analysisImage(full)
-	if err != nil {
-		return err
-	}
-
-	cctx, cancel := context.WithTimeout(ctx, analyzeTimeout)
-	defer cancel()
-	out, err := s.gemini.Describe(cctx, data, mime)
-	if err != nil {
-		return err
-	}
-	if err := s.photos.SaveAnalysis(p.ID, out.Caption, out.Tags); err != nil {
-		return fmt.Errorf("วิเคราะห์แล้วแต่บันทึกลงฐานข้อมูลไม่สำเร็จ: %w", err)
-	}
-	return nil
 }
 
 // analysisImage เตรียมภาพที่จะส่งให้ AI: JPEG/PNG/GIF ย่อด้วย Go (และหมุนตาม EXIF)
@@ -183,7 +151,7 @@ func analysisImage(path string) ([]byte, string, error) {
 // ---- ค้นหา ----
 
 // SearchPhotos ค้นรูปของปลายทางปัจจุบันจากคำอธิบาย และ/หรือแท็ก
-//   - text: คำค้นหาอิสระ แยกด้วยช่องว่างได้หลายคำ (ทุกคำต้องอยู่ในคำอธิบาย)
+//   - text: คำค้นหาคั่นด้วยช่องว่าง แต่ละคำต้องตรงหรือสะกดใกล้เคียงกับ caption/tag
 //   - tags: แท็กที่เลือกจาก Tag Cloud (รูปต้องมีครบทุกแท็ก)
 func (s *PhotoService) SearchPhotos(text string, tags []string) ([]model.Photo, error) {
 	dest := s.snapshot().Dest

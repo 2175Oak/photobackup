@@ -1,5 +1,4 @@
-// Package gemini เรียก Gemini API (REST) เพื่อให้ AI อธิบายภาพและตั้งแท็กให้
-// ใช้เฉพาะ standard library จึงไม่ต้องเพิ่ม dependency และทดสอบได้ด้วย httptest
+// Package gemini เรียก Gemini REST API เพื่ออธิบายภาพและตั้งแท็ก
 package gemini
 
 import (
@@ -16,7 +15,6 @@ import (
 )
 
 const (
-	DefaultModel   = "gemini-3.8-flash"
 	defaultBaseURL = "https://generativelanguage.googleapis.com/v1beta"
 	maxTags        = 10
 	maxRetries     = 3
@@ -55,10 +53,10 @@ type Client struct {
 	backoff time.Duration
 }
 
-// New สร้าง client ถ้า model ว่างจะใช้ DefaultModel
+// New สร้าง REST client ถ้า model ว่างจะใช้ DefaultTagModel
 func New(apiKey, model string) *Client {
 	if strings.TrimSpace(model) == "" {
-		model = DefaultModel
+		model = DefaultTagModel
 	}
 	return &Client{
 		apiKey:  strings.TrimSpace(apiKey),

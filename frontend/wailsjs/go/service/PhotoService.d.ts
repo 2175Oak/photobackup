@@ -6,6 +6,8 @@ import {context} from '../models';
 
 export function AnalyzePending():Promise<service.AnalyzeResult>;
 
+export function AnalyzeSample():Promise<service.AnalyzeResult>;
+
 export function CancelAnalyze():Promise<void>;
 
 export function CheckIntegrity():Promise<Array<service.IntegrityItem>>;
@@ -17,6 +19,8 @@ export function CleanDest():Promise<number>;
 export function Delete(arg1:Array<string>):Promise<service.DeleteResult>;
 
 export function DeleteAll():Promise<service.DeleteResult>;
+
+export function DescribePhoto(arg1:number):Promise<string>;
 
 export function GetAnalysisStatus():Promise<service.AnalysisStatus>;
 

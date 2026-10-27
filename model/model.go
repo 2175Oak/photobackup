@@ -5,13 +5,18 @@ import "time"
 // Photo คือรูปหนึ่งรูปที่ถูกย้ายมาเก็บไว้ในโฟลเดอร์ปลายทาง (Dest)
 // Dest ใช้แยกประวัติของแต่ละปลายทางออกจากกัน
 type Photo struct {
-	ID         int64     `gorm:"primaryKey" json:"id"`
-	FileName   string    `gorm:"not null" json:"fileName"`
-	Dest       string    `gorm:"index" json:"dest"`
-	BackupPath string    `gorm:"not null;uniqueIndex" json:"backupPath"`
-	Caption    string    `json:"caption"`
-	BackedUpAt time.Time `gorm:"autoCreateTime" json:"backedUpAt"`
-	Tags       []Tag     `gorm:"many2many:photo_tag;" json:"tags"`
+	ID               int64     `gorm:"primaryKey" json:"id"`
+	FileName         string    `gorm:"not null" json:"fileName"`
+	Dest             string    `gorm:"index" json:"dest"`
+	BackupPath       string    `gorm:"not null;uniqueIndex" json:"backupPath"`
+	Caption          string    `json:"caption"`
+	AnalysisState    string    `gorm:"index" json:"analysisState"`
+	AnalysisError    string    `json:"-"`
+	AnalysisHash     string    `gorm:"index" json:"-"`
+	AnalysisVersion  string    `json:"-"`
+	AnalysisAttempts int       `json:"-"`
+	BackedUpAt       time.Time `gorm:"autoCreateTime" json:"backedUpAt"`
+	Tags             []Tag     `gorm:"many2many:photo_tag;" json:"tags"`
 }
 
 type Tag struct {

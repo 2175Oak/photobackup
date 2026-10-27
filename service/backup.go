@@ -37,12 +37,22 @@ type PhotoService struct {
 	source string
 	dest   string
 
-	opMu sync.Mutex // ให้ย้าย/ลบ/ล้างข้อมูล ทำได้ทีละงาน
+	opMu           sync.Mutex // ให้ย้าย/ลบ/ล้างข้อมูล ทำได้ทีละงาน
+	analysisSaveMu sync.Mutex // SQLite writes remain serial while API calls run concurrently
 
 	thumbSem chan struct{} // จำกัดจำนวนรูปที่ถูกย่อพร้อมกัน ไม่ให้กินหน่วยความจำมาก
 
-	gemini        *gemini.Client     // วิเคราะห์ภาพ (อ่าน GEMINI_API_KEY จาก .env)
+	batch         batchAnalyzer
 	cancelAnalyze context.CancelFunc // หยุดงานวิเคราะห์ที่กำลังทำอยู่ (ป้องกันด้วย mu)
+}
+
+type batchAnalyzer interface {
+	Configured() bool
+	Model() string
+	Settings() gemini.BatchConfig
+	ResetStats()
+	Stats() gemini.BatchStats
+	Tag(context.Context, []gemini.TagImage) (map[int64]gemini.Result, error)
 }
 
 func NewPhotoService(db *gorm.DB) *PhotoService {
@@ -50,8 +60,12 @@ func NewPhotoService(db *gorm.DB) *PhotoService {
 		photos:   repository.NewPhotoRepository(db),
 		settings: repository.NewSettingRepository(db),
 		thumbSem: make(chan struct{}, 3),
-		gemini:   gemini.New(os.Getenv("GEMINI_API_KEY"), os.Getenv("GEMINI_MODEL")),
 	}
+	s.batch = gemini.NewBatch(os.Getenv("GEMINI_API_KEY"), os.Getenv("GEMINI_TAG_MODEL"), gemini.BatchConfig{
+		Size: analysisEnvInt("ANALYSIS_BATCH_SIZE", 12, 1, gemini.MaxBatchSize), Workers: analysisEnvInt("ANALYSIS_WORKERS", 4, 1, 8),
+		RPM: analysisEnvInt("ANALYSIS_RPM", 14, 1, 10000), TPM: analysisEnvInt("ANALYSIS_TPM", 200000, 2000, 10000000),
+		MaxRequests: analysisEnvInt("ANALYSIS_MAX_REQUESTS", 200, 1, 10000),
+	})
 	// จำโฟลเดอร์ที่ใช้ครั้งล่าสุด
 	if cfg, err := s.settings.Load(); err == nil {
 		s.source, s.dest = cfg.Source, cfg.Dest
